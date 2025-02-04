@@ -19,7 +19,7 @@ from functools import partial
 import logging
 import time
 from typing import Mapping
-
+# from modulus.datapipes.gnn.naca0012_dataset import naca0012Dataset
 import hydra
 from hydra.utils import instantiate, to_absolute_path
 
