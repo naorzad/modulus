@@ -303,6 +303,7 @@ def process_run(
     friction_min=0.0,   # New parameter
     friction_max=0.1,    # New parameter
     clip_values_flag=True,
+    partition_graph=True # New parameter
 ):
     """Process a single run directory to generate a multi-level graph and apply partitioning."""
     run_id = os.path.basename(run_path).split("_")[-1]
@@ -390,10 +391,19 @@ def process_run(
         graph = add_edge_features(graph)
 
         # Partition the graph
-        partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
+        # partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
 
+        if not partition_graph and graph.num_nodes() > 100000:  # Arbitrary threshold
+            print(f"Warning: Large graph ({graph.num_nodes()} nodes) being processed without partitioning. Consider enabling partitioning if memory issues occur.")
+        if partition_graph:
+            partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
+            save_partitioned_graphs(partitioned_graphs, partition_file_path)
+        else:
+            graph.ndata["inner_node"] = torch.ones(graph.num_nodes(), dtype=torch.bool)
+            graph.ndata[dgl.NID] = torch.arange(graph.num_nodes(), dtype=torch.long)
+            save_graphs(partition_file_path, [graph])
+        
         # Save the partitions and global context
-        save_partitioned_graphs(partitioned_graphs, partition_file_path)
         np.save(context_file_path, global_context)
         np.save(context_file_path_unnorm, global_context_unnorm)
         
@@ -429,6 +439,7 @@ def process_all_runs(
     friction_min=0.0,
     friction_max=0.1,
     clip_values_flag=True,
+    partition_graph=True # New parameter
 ):
     """Process all runs in the base directory in parallel."""
 
@@ -441,17 +452,20 @@ def process_all_runs(
     train_dirs, val_dirs, test_dirs = split_data(run_dirs)
 
     tasks_train = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "train", i+1)
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "train", i+1, 
+         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
         for i, run_dir in enumerate(train_dirs)
     ]
 
     tasks_val = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "validation", i+1)
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "validation", i+1,
+         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
         for i, run_dir in enumerate(val_dirs)
     ]
 
     tasks_test = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "test", i+1)
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "test", i+1,
+         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
         for i, run_dir in enumerate(test_dirs)
     ]
 
@@ -490,6 +504,12 @@ def main(cfg: DictConfig) -> None:
         halo_hops=cfg.num_message_passing_layers,
         num_workers=cfg.num_preprocess_workers,
         save_point_cloud=cfg.save_point_clouds,
+        pressure_min=cfg.get('pressure_min', -1.0),
+        pressure_max=cfg.get('pressure_max', 1.0),
+        friction_min=cfg.get('friction_min', 0.0),
+        friction_max=cfg.get('friction_max', 0.1),
+        clip_values_flag=cfg.get('clip_values_flag', True),
+        partition_graph=cfg.get('partition_graph', True)  # New parameter
     )
 
 if __name__ == "__main__":

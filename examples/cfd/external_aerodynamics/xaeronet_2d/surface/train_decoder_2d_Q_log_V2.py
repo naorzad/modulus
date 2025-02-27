@@ -150,6 +150,9 @@ from utils import (
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     
+    if not cfg.partition_graph:
+        cfg.num_partitions = 1  # Override for single-graph case
+    
     # Enable cuDNN auto-tuner
     torch.backends.cudnn.benchmark = cfg.enable_cudnn_benchmark
 

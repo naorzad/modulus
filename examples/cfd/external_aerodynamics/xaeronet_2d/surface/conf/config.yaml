@@ -37,6 +37,7 @@ pressure_max: 3.0
 friction_min: -0.01
 friction_max: 0.01
 clip_values_flag: true  # New parameter, defaults to true
+partition_graph: false  # Default to partitioning, set to false for single graph
 
 # ┌───────────────────────────────────────────┐
 # │           Model Configuration             │
