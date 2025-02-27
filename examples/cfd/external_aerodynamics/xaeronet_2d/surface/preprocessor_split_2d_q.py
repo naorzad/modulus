@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import dgl
 import hydra
+import random
 
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
@@ -69,19 +70,93 @@ def add_edge_features(graph):
     row = row.long()
     col = col.long()
 
-    disp = pos[row] - pos[col]
+    disp = pos[row][:, :2] - pos[col][:, :2]  # Only consider X and Y
     disp_norm = torch.linalg.norm(disp, dim=-1, keepdim=True)
     graph.edata["x"] = torch.cat((disp, disp_norm), dim=-1)
 
     return graph
 
+import math
+
+def calculate_dynamic_pressure(M, Re):
+    # Constants
+    gamma = 1.4  # Ratio of specific heats
+    R = 287.87  # Specific gas constant in J/kg·K
+    T = 273.15  # Free-stream temperature in K
+    L = 1.0  # Reynolds length in meters
+    mu = 1.853E-5  # Free-stream viscosity in kg/(m·s)
+
+    # Calculate the speed of sound
+    a = math.sqrt(gamma * R * T)
+
+    # Calculate free-stream velocity
+    U = M * a
+
+    # Calculate fluid density
+    rho = (Re * mu) / (U * L)
+
+    # Calculate dynamic pressure
+    q = 0.5 * rho * U**2
+    return q
+
 def extract_global_context(file_name):
-    """Extracts global context parameters from the file name."""
+    """
+    Extracts global context parameters from the file name and normalizes them.
+    Includes Mach number (M), Reynolds number (ReL), Angle of Attack (AOA), and
+    dynamic pressure (q), all normalized with mean and std.
+    """
     parts = file_name.split('_')
     M = float(parts[1])
     ReL = float(parts[3])
     AOA = float(parts[5].replace('.vtk', ''))
-    return [M, ReL, AOA]
+    
+    # Predefined stats for M, ReL, AOA
+    M_avg = 0.525
+    M_std = 0.325
+    M_norm = (M - M_avg) / M_std
+    
+    ReL_avg = 6.3
+    ReL_std = 2.6
+    ReL_norm = (ReL - ReL_avg) / ReL_std
+    
+    AOA_avg = 5
+    AOA_std = 5
+    AOA_norm = (AOA - AOA_avg) / AOA_std
+    
+    # Calculate and normalize q
+    q = calculate_dynamic_pressure(M, 10**ReL)
+    q_mean = 13066.60  # From your stats
+    q_std = 21293.94   # From your stats
+    q_norm = (q - q_mean) / q_std
+    
+    # Construct vectors
+    norm_vec = [M_norm, ReL_norm, AOA_norm, q_norm]
+    unnorm_vec = [M, ReL, AOA, q]
+    
+    return norm_vec, unnorm_vec
+# def extract_global_context(file_name):
+#     """Extracts global context parameters from the file name."""
+#     parts = file_name.split('_')
+#     M = float(parts[1])
+#     ReL = float(parts[3])
+#     AOA = float(parts[5].replace('.vtk', ''))
+    
+#     # Define min and max values for normalization
+#     M_min = 0.2
+#     M_max = 0.85
+#     ReL_min = 5.0
+#     ReL_max = 7.6
+#     AOA_min = 0
+#     AOA_max = 10
+    
+#     # Apply min-max normalization
+#     M_norm = (M - M_min) / (M_max - M_min)
+#     ReL_norm = (ReL - ReL_min) / (ReL_max - ReL_min)
+#     AOA_norm = (AOA - AOA_min) / (AOA_max - AOA_min)
+    
+#     norm_vec = [M_norm, ReL_norm, AOA_norm]
+#     unnorm_vec = [M, ReL, AOA]
+#     return norm_vec, unnorm_vec
 
 # Define this function outside of any local scope so it can be pickled
 def run_task(params):
@@ -192,8 +267,25 @@ def calculate_2d_normals(points, n_neighbors=2, epsilon=1e-6):
     # visualize_normals(points, normals)
     return normals
 
+def split_data(run_dirs, train_ratio=0.95, val_ratio=0.03, test_ratio=0.02):
+    """Split the run directories into training, validation, and test sets."""
+    random.shuffle(run_dirs)
+    total_runs = len(run_dirs)
+    train_end = int(total_runs * train_ratio)
+    val_end = train_end + int(total_runs * val_ratio)
+    
+    train_dirs = run_dirs[:train_end]
+    val_dirs = run_dirs[train_end:val_end]
+    test_dirs = run_dirs[val_end:]
+    
+    return train_dirs, val_dirs, test_dirs
+
+def save_partitioned_graphs(partitioned_graphs, partition_file_path):
+    """Save partitioned graphs to the specified file path."""
+    save_graphs(partition_file_path, partitioned_graphs)
+
 def process_run(
-    run_path, point_list, node_degree, num_partitions, halo_hops, save_point_cloud=False
+    run_path, point_list, node_degree, num_partitions, halo_hops, save_point_cloud=False, data_type="train", file_index=1
 ):
     """Process a single run directory to generate a multi-level graph and apply partitioning."""
     run_id = os.path.basename(run_path).split("_")[-1]
@@ -207,11 +299,11 @@ def process_run(
     vtk_file = os.path.join(run_path, vtk_files[0])
     
     # Extract global context from file name
-    global_context = extract_global_context(vtk_files[0])
-    
+    global_context, global_context_unnorm = extract_global_context(vtk_files[0])
     # Path to save the list of partitions and global context
-    partition_file_path = to_absolute_path(f"/workspace/NACA0012_SurfaceFlow/partitions/graph_partitions_{run_id}.bin")
-    context_file_path = os.path.join(os.path.dirname(partition_file_path), f"global_context_{run_id}.npy")
+    partition_file_path = to_absolute_path(f"/workspace/NACA0012_SurfaceFlow/{data_type}_partitions/graph_partitions_{file_index}.bin")
+    context_file_path = os.path.join(os.path.dirname(partition_file_path), f"global_context_{file_index}.npy")
+    context_file_path_unnorm = os.path.join(os.path.dirname(partition_file_path), f"global_context_{file_index}_unnorm.npy")
 
     if os.path.exists(partition_file_path):
         print(f"Partitions for run {run_id} already exist. Skipping...")
@@ -219,7 +311,7 @@ def process_run(
 
     if not os.path.exists(vtk_file):
         print(f"Warning: Missing files for run {run_id}. Skipping...")
-        return
+        return 
 
     try:
         # Load the VTK file
@@ -271,30 +363,33 @@ def process_run(
         graph = dgl.to_bidirected(graph, copy_ndata=True)
         graph = dgl.add_self_loop(graph)
 
-        graph.ndata["coordinates"] = torch.tensor(all_points, dtype=torch.float32)
+        graph.ndata["coordinates"] = torch.tensor(all_points, dtype=torch.float32)  # Only X and Y
         graph.ndata["normals"] = torch.tensor(all_normals, dtype=torch.float32)
         graph.ndata["pressure"] = torch.tensor(pressure, dtype=torch.float32).unsqueeze(-1)
-        graph.ndata["shear_stress"] = torch.tensor(shear_stress, dtype=torch.float32)
+        graph.ndata["shear_stress"] = torch.tensor(shear_stress[:, :2], dtype=torch.float32)
         graph.ndata["area"] = torch.tensor(all_areas, dtype=torch.float32).unsqueeze(-1)  # Add area to node data
         graph = add_edge_features(graph)
 
         # Partition the graph
         partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
 
-        # Save the partitions
-        save_graphs(partition_file_path, partitioned_graphs)
-
-        # Save the global context
+        # Save the partitions and global context
+        save_partitioned_graphs(partitioned_graphs, partition_file_path)
         np.save(context_file_path, global_context)
-
+        np.save(context_file_path_unnorm, global_context_unnorm)
+        
         if save_point_cloud:
-            point_cloud = pv.PolyData(graph.ndata["coordinates"].numpy())
-            point_cloud["coordinates"] = graph.ndata["coordinates"].numpy()
-            point_cloud["normals"] = graph.ndata["normals"].numpy()
-            point_cloud["pressure"] = graph.ndata["pressure"].numpy()
+            point_cloud_dir = f"/workspace/NACA0012_SurfaceFlow/{data_type}_point_clouds"
+            os.makedirs(point_cloud_dir, exist_ok=True)
+            point_cloud_path = os.path.join(point_cloud_dir, f"point_cloud_{file_index}.vtp")
+            point_cloud = pv.PolyData(np.column_stack((graph.ndata["coordinates"].numpy(), np.zeros((graph.ndata["coordinates"].shape[0], 1)))))
+            point_cloud["coordinates"] = np.column_stack((graph.ndata["coordinates"].numpy(), np.zeros((graph.ndata["coordinates"].shape[0], 1))))
+            point_cloud["normals"] = np.column_stack((graph.ndata["normals"].numpy(), np.zeros((graph.ndata["normals"].shape[0], 1))))
+            point_cloud["pressure"] = graph.ndata["pressure"].numpy()  # Keep pressure as it is
             point_cloud["shear_stress"] = graph.ndata["shear_stress"].numpy()
             point_cloud["area"] = graph.ndata["area"].numpy()  # Add area to point cloud
-            point_cloud.save(f"point_clouds/point_cloud_{run_id}.vtp")
+            # point_cloud["x"] = graph.edata["x"].numpy()  # Add area to point cloud
+            point_cloud.save(point_cloud_path)
 
     except Exception as e:
         print(
@@ -308,7 +403,7 @@ def process_all_runs(
     node_degree,
     num_partitions,
     halo_hops,
-    num_workers=16,
+    num_workers=8,
     save_point_cloud=False,
 ):
     """Process all runs in the base directory in parallel."""
@@ -319,20 +414,47 @@ def process_all_runs(
         if d.startswith("run_") and os.path.isdir(os.path.join(base_path, d))
     ]
 
-    tasks = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud)
-        for run_dir in run_dirs
+    train_dirs, val_dirs, test_dirs = split_data(run_dirs)
+
+    tasks_train = [
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "train", i+1)
+        for i, run_dir in enumerate(train_dirs)
+    ]
+
+    tasks_val = [
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "validation", i+1)
+        for i, run_dir in enumerate(val_dirs)
+    ]
+
+    tasks_test = [
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "test", i+1)
+        for i, run_dir in enumerate(test_dirs)
     ]
 
     with ProcessPoolExecutor(max_workers=num_workers) as pool:
         for _ in tqdm(
-            pool.map(run_task, tasks),
-            total=len(tasks),
-            desc="Processing Runs",
+            pool.map(run_task, tasks_train),
+            total=len(tasks_train),
+            desc="Processing Training Runs",
             unit="run",
         ):
             pass
 
+        for _ in tqdm(
+            pool.map(run_task, tasks_val),
+            total=len(tasks_val),
+            desc="Processing Validation Runs",
+            unit="run",
+        ):
+            pass
+
+        for _ in tqdm(
+            pool.map(run_task, tasks_test),
+            total=len(tasks_test),
+            desc="Processing Test Runs",
+            unit="run",
+        ):
+            pass
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -345,7 +467,6 @@ def main(cfg: DictConfig) -> None:
         num_workers=cfg.num_preprocess_workers,
         save_point_cloud=cfg.save_point_clouds,
     )
-
 
 if __name__ == "__main__":
     main()

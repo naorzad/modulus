@@ -25,31 +25,32 @@ hydra:
 # │            Data Preprocessing             │
 # └───────────────────────────────────────────┘  
 
-num_nodes: [100, 200, 400]                  # Number of nodes in the graphs
+num_nodes: [320, 640, 1280]                  # Number of nodes in the graphs
 node_degree: 4                                       # Degree of the nodes in the graphs
 num_partitions: 2                                    # Number of partitions for each graph
 data_path: /workspace/NACA0012_SurfaceFlow       # Path to the raw data
-num_preprocess_workers: 4                            # Number of workers for data preprocessing
-save_point_clouds: false                             # Save point clouds for the preprocessed data
+epsilon: 1e-8
+num_preprocess_workers: 8                            # Number of workers for data preprocessing
+save_point_clouds: true                             # Save point clouds for the preprocessed data
 
 # ┌───────────────────────────────────────────┐
 # │           Model Configuration             │
 # └───────────────────────────────────────────┘
 
 num_message_passing_layers: 15                       # Number of message passing layers
-hidden_dim: 512                                      # Hidden dimension of the model
+hidden_dim: 128                                      # Hidden dimension of the model
 activation: silu                                     # Activation function
 
 # ┌───────────────────────────────────────────┐
 # │          Training Configuration           │
 # └───────────────────────────────────────────┘
 
-partitions_path: ${data_path}/partitions          # Path to the partitions (.bin files)
+partitions_path: ${data_path}/train_partitions          # Path to the partitions (.bin files)
 validation_partitions_path: ${data_path}/validation_partitions  # Path to the validation partitions (.bin files)
 stats_file: global_stats.json                       # Path to the global statistics (.json file)
 checkpoint_filename: model_checkpoint.pth           # Filename of the model checkpoint
-num_epochs: 2000                                    # Number of epochs
-start_lr: 0.001                                     # Initial learning rate (cos annealing schedule is used) 
+num_epochs: 800                                    # Number of epochs
+start_lr: 0.02                                       # Initial learning rate (cos annealing schedule is used) 
 end_lr: 0.000001                                    # Final learning rate (cos annealing schedule is used)                              
 save_checkpoint_freq: 5                             # Frequency of saving the model checkpoint
 validation_freq: 50                                 # Frequency of validation

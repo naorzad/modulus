@@ -39,7 +39,7 @@ import numpy as np
 from hydra.utils import to_absolute_path
 from torch.nn.parallel import DistributedDataParallel
 import torch.optim as optim
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from omegaconf import DictConfig
 
@@ -57,23 +57,22 @@ from modulus.models.layers import get_activation
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-# Class definition
 class MeshGraphNetWithContext(MeshGraphNet):
     def __init__(self,         
         input_dim_nodes,
         input_dim_edges,
         output_dim,
         context_dim,  # Add context dimension
-        processor_size=15,
+        processor_size=5,
         mlp_activation_fn="relu",
         num_layers_node_processor=2,
         num_layers_edge_processor=2,
-        hidden_dim_processor=128,
-        hidden_dim_node_encoder=128,
+        hidden_dim_processor=56,
+        hidden_dim_node_encoder=56,
         num_layers_node_encoder=2,
-        hidden_dim_edge_encoder=128,
+        hidden_dim_edge_encoder=56,
         num_layers_edge_encoder=2,
-        hidden_dim_node_decoder=128,
+        hidden_dim_node_decoder=56,
         num_layers_node_decoder=2,
         aggregation="sum",
         do_concat_trick=False,
@@ -81,7 +80,7 @@ class MeshGraphNetWithContext(MeshGraphNet):
         recompute_activation=False,
     ):
         super(MeshGraphNetWithContext, self).__init__(
-            input_dim_nodes=input_dim_nodes + context_dim,
+            input_dim_nodes=input_dim_nodes,
             input_dim_edges=input_dim_edges,
             output_dim=output_dim,
             processor_size=processor_size,
@@ -100,24 +99,18 @@ class MeshGraphNetWithContext(MeshGraphNet):
             num_processor_checkpoint_segments=num_processor_checkpoint_segments,
             recompute_activation=recompute_activation,
         )
-        # print(f"input_dim_nodes size: {input_dim_nodes}")
         self.context_dim = context_dim
-        self.node_encoder = MeshGraphMLP(
-            input_dim_nodes + context_dim,
-            output_dim=hidden_dim_processor,  # Match hidden_dim_processor
-            hidden_dim=hidden_dim_node_encoder,
-            hidden_layers=num_layers_node_encoder,
+        self.node_decoder = MeshGraphMLP(
+            hidden_dim_processor + context_dim,  # Adjust for context dimension
+            output_dim=output_dim,
+            hidden_dim=hidden_dim_node_decoder,
+            hidden_layers=num_layers_node_decoder,
             activation_fn=get_activation(mlp_activation_fn),
-            norm_type="LayerNorm",
+            norm_type=None,
             recompute_activation=recompute_activation,
         )
 
     def forward(self, node_features: Tensor, edge_features: Tensor, graph: DGLGraph, context: Tensor) -> Tensor:
-        # Debugging: Print shapes and data types
-        # print(f"node_features shape: {node_features.shape}, dtype: {node_features.dtype}")
-        # print(f"edge_features shape: {edge_features.shape}, dtype: {edge_features.dtype}")
-        # print(f"context shape: {context.shape}, dtype: {context.dtype}")
-        
         # Ensure edge_features has the correct shape
         if edge_features.shape[1] != self.edge_encoder.model[0].in_features:
             raise ValueError(f"Expected edge_features with {self.edge_encoder.model[0].in_features} features, but got {edge_features.shape[1]}")
@@ -125,17 +118,20 @@ class MeshGraphNetWithContext(MeshGraphNet):
         # Convert input tensors to the same dtype as model parameters
         node_features = node_features.to(self.node_encoder.model[0].weight.dtype)
         edge_features = edge_features.to(self.edge_encoder.model[0].weight.dtype)
-        context = context.to(self.node_encoder.model[0].weight.dtype)
+        context = context.to(self.node_decoder.model[0].weight.dtype)
         
+        # Encode node and edge features
         edge_features = self.edge_encoder(edge_features)
+        node_features = self.node_encoder(node_features)
+        
+        # Process node and edge features
+        node_features = self.processor(node_features, edge_features, graph)
+        
+        # Expand context and concatenate with node features before decoding
         context_expanded = context.unsqueeze(0).expand(node_features.size(0), -1)
         node_features = torch.cat([node_features, context_expanded], dim=1)
         
-        # Debugging: Print shape after concatenation
-        # print(f"node_features shape after concatenation: {node_features.shape}")
-        
-        node_features = self.node_encoder(node_features)
-        node_features = self.processor(node_features, edge_features, graph)
+        # Decode node features
         node_features = self.node_decoder(node_features)
         return node_features
     
@@ -254,11 +250,12 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Optimizer and scheduler
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=2000, eta_min=1e-6
-    )
-    scaler = GradScaler()
+    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+    # scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer, T_max=2000, eta_min=1e-5
+    # )
+    scaler = GradScaler('cuda')
     print("Instantiated the model and optimizer")
 
     # Check if there's a checkpoint to resume from

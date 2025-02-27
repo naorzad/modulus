@@ -39,7 +39,8 @@ import numpy as np
 from hydra.utils import to_absolute_path
 from torch.nn.parallel import DistributedDataParallel
 import torch.optim as optim
-from torch.cuda.amp import GradScaler
+import torch.nn.functional as F
+from torch.amp import GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from omegaconf import DictConfig
 
@@ -57,7 +58,6 @@ from modulus.models.layers import get_activation
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-# Class definition
 class MeshGraphNetWithContext(MeshGraphNet):
     def __init__(self,         
         input_dim_nodes,
@@ -68,10 +68,10 @@ class MeshGraphNetWithContext(MeshGraphNet):
         mlp_activation_fn="relu",
         num_layers_node_processor=2,
         num_layers_edge_processor=2,
-        hidden_dim_processor=128,
-        hidden_dim_node_encoder=128,
+        hidden_dim_processor=64,
+        hidden_dim_node_encoder=64,
         num_layers_node_encoder=2,
-        hidden_dim_edge_encoder=128,
+        hidden_dim_edge_encoder=64,
         num_layers_edge_encoder=2,
         hidden_dim_node_decoder=128,
         num_layers_node_decoder=2,
@@ -79,9 +79,10 @@ class MeshGraphNetWithContext(MeshGraphNet):
         do_concat_trick=False,
         num_processor_checkpoint_segments=0,
         recompute_activation=False,
+        dropout_rate=0.3  # Add dropout rate
     ):
         super(MeshGraphNetWithContext, self).__init__(
-            input_dim_nodes=input_dim_nodes + context_dim,
+            input_dim_nodes=input_dim_nodes,
             input_dim_edges=input_dim_edges,
             output_dim=output_dim,
             processor_size=processor_size,
@@ -100,24 +101,19 @@ class MeshGraphNetWithContext(MeshGraphNet):
             num_processor_checkpoint_segments=num_processor_checkpoint_segments,
             recompute_activation=recompute_activation,
         )
-        # print(f"input_dim_nodes size: {input_dim_nodes}")
         self.context_dim = context_dim
-        self.node_encoder = MeshGraphMLP(
-            input_dim_nodes + context_dim,
-            output_dim=hidden_dim_processor,  # Match hidden_dim_processor
-            hidden_dim=hidden_dim_node_encoder,
-            hidden_layers=num_layers_node_encoder,
+        self.dropout_rate = dropout_rate  # Store dropout rate
+        self.node_decoder = MeshGraphMLP(
+            hidden_dim_processor + context_dim,  # Adjust for context dimension
+            output_dim=output_dim,
+            hidden_dim=hidden_dim_node_decoder,
+            hidden_layers=num_layers_node_decoder,
             activation_fn=get_activation(mlp_activation_fn),
-            norm_type="LayerNorm",
+            norm_type=None,
             recompute_activation=recompute_activation,
         )
 
     def forward(self, node_features: Tensor, edge_features: Tensor, graph: DGLGraph, context: Tensor) -> Tensor:
-        # Debugging: Print shapes and data types
-        # print(f"node_features shape: {node_features.shape}, dtype: {node_features.dtype}")
-        # print(f"edge_features shape: {edge_features.shape}, dtype: {edge_features.dtype}")
-        # print(f"context shape: {context.shape}, dtype: {context.dtype}")
-        
         # Ensure edge_features has the correct shape
         if edge_features.shape[1] != self.edge_encoder.model[0].in_features:
             raise ValueError(f"Expected edge_features with {self.edge_encoder.model[0].in_features} features, but got {edge_features.shape[1]}")
@@ -125,18 +121,21 @@ class MeshGraphNetWithContext(MeshGraphNet):
         # Convert input tensors to the same dtype as model parameters
         node_features = node_features.to(self.node_encoder.model[0].weight.dtype)
         edge_features = edge_features.to(self.edge_encoder.model[0].weight.dtype)
-        context = context.to(self.node_encoder.model[0].weight.dtype)
+        context = context.to(self.node_decoder.model[0].weight.dtype)
         
-        edge_features = self.edge_encoder(edge_features)
+        # Encode node and edge features with dropout
+        edge_features = F.dropout(self.edge_encoder(edge_features), p=self.dropout_rate, training=self.training)
+        node_features = F.dropout(self.node_encoder(node_features), p=self.dropout_rate, training=self.training)
+        
+        # Process node and edge features
+        node_features = self.processor(node_features, edge_features, graph)
+        
+        # Expand context and concatenate with node features before decoding
         context_expanded = context.unsqueeze(0).expand(node_features.size(0), -1)
         node_features = torch.cat([node_features, context_expanded], dim=1)
         
-        # Debugging: Print shape after concatenation
-        # print(f"node_features shape after concatenation: {node_features.shape}")
-        
-        node_features = self.node_encoder(node_features)
-        node_features = self.processor(node_features, edge_features, graph)
-        node_features = self.node_decoder(node_features)
+        # Decode node features with dropout
+        node_features = F.dropout(self.node_decoder(node_features), p=self.dropout_rate, training=self.training)
         return node_features
     
 from dataloader import create_dataloader
@@ -188,8 +187,19 @@ def main(cfg: DictConfig) -> None:
     mean = stats["mean"]
     std = stats["std_dev"]
 
+    # Define normalization settings
+    normalize = {
+        "coordinates": True,
+        "normals": True,
+        "area": True,
+        "pressure": True,
+        "shear_stress": True,
+        "x": True
+}
+
     # Create DataLoader
     print("Before DataLoader creation")
+    # Create DataLoader with normalization settings
     train_dataloader = create_dataloader(
         train_dataset,
         mean,
@@ -226,9 +236,9 @@ def main(cfg: DictConfig) -> None:
 
     # Initialize model
     model = MeshGraphNetWithContext(  # Updated class
-        input_dim_nodes=24,
-        input_dim_edges=4,
-        output_dim=4,
+        input_dim_nodes=16,
+        input_dim_edges=3,
+        output_dim=3,
         context_dim=3,  # Add context dimension
         processor_size=cfg.num_message_passing_layers,
         aggregation="sum",
@@ -238,6 +248,7 @@ def main(cfg: DictConfig) -> None:
         mlp_activation_fn=cfg.activation,
         do_concat_trick=cfg.use_concat_trick,
         num_processor_checkpoint_segments=cfg.checkpoint_segments,
+        dropout_rate = 0.3
     ).to(device)
     print(f"Number of trainable parameters: {count_trainable_params(model)}")
 
@@ -254,11 +265,12 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Optimizer and scheduler
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
+    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=2000, eta_min=1e-6
-    )
-    scaler = GradScaler()
+        optimizer, T_max=20, eta_min=1e-8)
+    
+    scaler = GradScaler('cuda')
     print("Instantiated the model and optimizer")
 
     # Check if there's a checkpoint to resume from
@@ -298,7 +310,7 @@ def main(cfg: DictConfig) -> None:
                     pred = model(ndata, part.edata["x"], part, global_context)
                     pred_filtered = pred[part.ndata["inner_node"].bool(), :]
                     target = torch.cat(
-                        (part.ndata["pressure"], part.ndata["shear_stress"]), dim=1
+                        (part.ndata["pressure"], part.ndata["shear_stress"][:, :2]), dim=1  # Ensure shear_stress is 2D
                     )
                     target_filtered = target[part.ndata["inner_node"].bool()]
                     loss = (
@@ -355,19 +367,19 @@ def main(cfg: DictConfig) -> None:
                     (num_nodes, 1), dtype=torch.float32, device=device
                 )
                 shear_stress_pred = torch.zeros(
-                    (num_nodes, 3), dtype=torch.float32, device=device
+                    (num_nodes, 2), dtype=torch.float32, device=device  # Change to 2D
                 )
                 pressure_true = torch.zeros(
                     (num_nodes, 1), dtype=torch.float32, device=device
                 )
                 shear_stress_true = torch.zeros(
-                    (num_nodes, 3), dtype=torch.float32, device=device
+                    (num_nodes, 2), dtype=torch.float32, device=device  # Change to 2D
                 )
                 coordinates = torch.zeros(
-                    (num_nodes, 3), dtype=torch.float32, device=device
+                    (num_nodes, 2), dtype=torch.float32, device=device  # Change to 2D
                 )
                 normals = torch.zeros(
-                    (num_nodes, 3), dtype=torch.float32, device=device
+                    (num_nodes, 2), dtype=torch.float32, device=device  # Change to 2D
                 )
                 area = torch.zeros((num_nodes, 1), dtype=torch.float32, device=device)
 
@@ -444,38 +456,63 @@ def main(cfg: DictConfig) -> None:
                             )
 
                 # Denormalize predictions and node features using the global stats
-                pressure_pred_denorm = (
-                    pressure_pred.cpu() * torch.tensor(std["pressure"])
-                ) + torch.tensor(mean["pressure"])
-                shear_stress_pred_denorm = (
-                    shear_stress_pred.cpu() * torch.tensor(std["shear_stress"])
-                ) + torch.tensor(mean["shear_stress"])
-                pressure_true_denorm = (
-                    pressure_true.cpu() * torch.tensor(std["pressure"])
-                ) + torch.tensor(mean["pressure"])
-                shear_stress_true_denorm = (
-                    shear_stress_true.cpu() * torch.tensor(std["shear_stress"])
-                ) + torch.tensor(mean["shear_stress"])
-                coordinates_denorm = (
-                    coordinates.cpu() * torch.tensor(std["coordinates"])
-                ) + torch.tensor(mean["coordinates"])
-                normals_denorm = (
-                    normals.cpu() * torch.tensor(std["normals"])
-                ) + torch.tensor(mean["normals"])
-                area_denorm = (area.cpu() * torch.tensor(std["area"])) + torch.tensor(
-                    mean["area"]
-                )
+                if normalize.get("pressure", True):
+                    pressure_pred_denorm = (
+                        pressure_pred.cpu() * torch.tensor(std["pressure"])
+                    ) + torch.tensor(mean["pressure"])
+                    pressure_true_denorm = (
+                        pressure_true.cpu() * torch.tensor(std["pressure"])
+                    ) + torch.tensor(mean["pressure"])
+                else:
+                    pressure_pred_denorm = pressure_pred.cpu()
+                    pressure_true_denorm = pressure_true.cpu()
+
+                if normalize.get("shear_stress", True):
+                    shear_stress_pred_denorm = (
+                        shear_stress_pred.cpu() * torch.tensor(std["shear_stress"])
+                    ) + torch.tensor(mean["shear_stress"])
+                    shear_stress_true_denorm = (
+                        shear_stress_true.cpu() * torch.tensor(std["shear_stress"])
+                    ) + torch.tensor(mean["shear_stress"])
+                else:
+                    shear_stress_pred_denorm = shear_stress_pred.cpu()
+                    shear_stress_true_denorm = shear_stress_true.cpu()
+
+                if normalize.get("coordinates", True):
+                    coordinates_denorm = (
+                        coordinates.cpu() * torch.tensor(std["coordinates"])
+                    ) + torch.tensor(mean["coordinates"])
+                else:
+                    coordinates_denorm = coordinates.cpu()
+
+                if normalize.get("normals", True):
+                    normals_denorm = (
+                        normals.cpu() * torch.tensor(std["normals"])
+                    ) + torch.tensor(mean["normals"])
+                else:
+                    normals_denorm = normals.cpu()
+
+                if normalize.get("area", True):
+                    area_denorm = (area.cpu() * torch.tensor(std["area"])) + torch.tensor(mean["area"])
+                else:
+                    area_denorm = area.cpu()
+
+                # Add zero Z-coordinate to coordinates, normals, and shear_stress
+                coordinates_denorm = np.column_stack((coordinates_denorm.numpy(), np.zeros((coordinates_denorm.shape[0], 1))))
+                normals_denorm = np.column_stack((normals_denorm.numpy(), np.zeros((normals_denorm.shape[0], 1))))
+                shear_stress_pred_denorm = np.column_stack((shear_stress_pred_denorm.numpy(), np.zeros((shear_stress_pred_denorm.shape[0], 1))))
+                shear_stress_true_denorm = np.column_stack((shear_stress_true_denorm.numpy(), np.zeros((shear_stress_true_denorm.shape[0], 1))))
 
                 # Save the full point cloud after accumulating all partition predictions
                 # Create a PyVista PolyData object for the point cloud
-                point_cloud = pv.PolyData(coordinates_denorm.numpy())
-                point_cloud["coordinates"] = coordinates_denorm.numpy()
-                point_cloud["normals"] = normals_denorm.numpy()
+                point_cloud = pv.PolyData(coordinates_denorm)
+                point_cloud["coordinates"] = coordinates_denorm
+                point_cloud["normals"] = normals_denorm
                 point_cloud["area"] = area_denorm.numpy()
                 point_cloud["pressure_pred"] = pressure_pred_denorm.numpy()
-                point_cloud["shear_stress_pred"] = shear_stress_pred_denorm.numpy()
+                point_cloud["shear_stress_pred"] = shear_stress_pred_denorm
                 point_cloud["pressure_true"] = pressure_true_denorm.numpy()
-                point_cloud["shear_stress_true"] = shear_stress_true_denorm.numpy()
+                point_cloud["shear_stress_true"] = shear_stress_true_denorm
 
                 # Save the point cloud
                 point_cloud.save(f"point_cloud_{validation_ids[i]}.vtp")
