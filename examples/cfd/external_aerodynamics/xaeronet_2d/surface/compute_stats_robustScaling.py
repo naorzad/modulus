@@ -9,6 +9,7 @@ import json
 import numpy as np
 import dgl
 import hydra
+from scipy.stats import skew
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from concurrent.futures import ProcessPoolExecutor
@@ -64,7 +65,7 @@ def aggregate_results(results, mean_std_fields=None, q_low=25, q_high=75):
     all_data = {field: np.concatenate([r[field] for r in results], axis=0) 
                 for field in results[0].keys()}
     
-    stats = {"mean": {}, "std": {}, "median": {}, "iqr": {}}
+    stats = {"mean": {}, "std": {}, "median": {}, "iqr": {}, "skewness":{}}
     mean_std_fields = mean_std_fields or []
 
     for field, values in all_data.items():
@@ -80,10 +81,11 @@ def aggregate_results(results, mean_std_fields=None, q_low=25, q_high=75):
         stats["median"][field] = np.median(values, axis=0).tolist()
         q1, q3 = np.percentile(values, [q_low, q_high], axis=0)
         stats["iqr"][field] = (q3 - q1).tolist()
+        stats["skewness"][field] = skew(values, axis=0).tolist()
     
     return stats
 
-def compute_global_stats(bin_files, num_workers=4, mean_std_fields=None, q_low=25, q_high=75):
+def compute_global_stats(bin_files, num_workers=4, mean_std_fields=None, q_low=10, q_high=90):
     """Compute global stats across all .bin files in parallel."""
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         results = list(tqdm(executor.map(process_file, bin_files), 
@@ -117,6 +119,7 @@ def main(cfg: DictConfig):
     print("Std:", stats["std"])
     print("Median:", stats["median"])
     print("IQR:", stats["iqr"])
+    print("skewness:", stats["skewness"])
 
 if __name__ == "__main__":
     main()

@@ -196,7 +196,6 @@ def read_vtk(file_path):
     """Reads a .vtk file and returns a PyVista mesh."""
     return pv.read(file_path)
 
-
 def visualize_normals(points, normals):
     """Visualize 2D points and their normals using PyVista."""
     # Add a zero vector for the Z-coordinate
@@ -284,8 +283,26 @@ def save_partitioned_graphs(partitioned_graphs, partition_file_path):
     """Save partitioned graphs to the specified file path."""
     save_graphs(partition_file_path, partitioned_graphs)
 
+def clip_values(values, min_val, max_val, clip_values_flag=True):
+    """Clip values to be within min_val and max_val if clip_values_flag is True."""
+    if clip_values_flag:
+        return torch.clamp(values, min=min_val, max=max_val)
+    return values
+
 def process_run(
-    run_path, point_list, node_degree, num_partitions, halo_hops, save_point_cloud=False, data_type="train", file_index=1
+    run_path, 
+    point_list, 
+    node_degree, 
+    num_partitions, 
+    halo_hops, 
+    save_point_cloud=False, 
+    data_type="train", 
+    file_index=1,
+    pressure_min=-1.0,  # New parameter
+    pressure_max=1.0,   # New parameter
+    friction_min=0.0,   # New parameter
+    friction_max=0.1,    # New parameter
+    clip_values_flag=True,
 ):
     """Process a single run directory to generate a multi-level graph and apply partitioning."""
     run_id = os.path.basename(run_path).split("_")[-1]
@@ -365,8 +382,10 @@ def process_run(
 
         graph.ndata["coordinates"] = torch.tensor(all_points, dtype=torch.float32)  # Only X and Y
         graph.ndata["normals"] = torch.tensor(all_normals, dtype=torch.float32)
-        graph.ndata["pressure"] = torch.tensor(pressure, dtype=torch.float32).unsqueeze(-1)
-        graph.ndata["shear_stress"] = torch.tensor(shear_stress[:, :2], dtype=torch.float32)
+        pressure_tensor = torch.tensor(pressure, dtype=torch.float32).unsqueeze(-1)
+        shear_stress_tensor = torch.tensor(shear_stress[:, :2], dtype=torch.float32)
+        graph.ndata["pressure"] = clip_values(pressure_tensor, pressure_min, pressure_max, clip_values_flag)
+        graph.ndata["shear_stress"] = clip_values(shear_stress_tensor, friction_min, friction_max, clip_values_flag)
         graph.ndata["area"] = torch.tensor(all_areas, dtype=torch.float32).unsqueeze(-1)  # Add area to node data
         graph = add_edge_features(graph)
 
@@ -405,6 +424,11 @@ def process_all_runs(
     halo_hops,
     num_workers=8,
     save_point_cloud=False,
+    pressure_min=-1.0,
+    pressure_max=1.0,
+    friction_min=0.0,
+    friction_max=0.1,
+    clip_values_flag=True,
 ):
     """Process all runs in the base directory in parallel."""
 
