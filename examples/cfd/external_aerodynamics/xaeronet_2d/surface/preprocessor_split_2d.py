@@ -98,29 +98,6 @@ def extract_global_context(file_name):
     norm_vec = [M_norm, ReL_norm, AOA_norm]
     unnorm_vec = [M, ReL, AOA]
     return norm_vec, unnorm_vec
-# def extract_global_context(file_name):
-#     """Extracts global context parameters from the file name."""
-#     parts = file_name.split('_')
-#     M = float(parts[1])
-#     ReL = float(parts[3])
-#     AOA = float(parts[5].replace('.vtk', ''))
-    
-#     # Define min and max values for normalization
-#     M_min = 0.2
-#     M_max = 0.85
-#     ReL_min = 5.0
-#     ReL_max = 7.6
-#     AOA_min = 0
-#     AOA_max = 10
-    
-#     # Apply min-max normalization
-#     M_norm = (M - M_min) / (M_max - M_min)
-#     ReL_norm = (ReL - ReL_min) / (ReL_max - ReL_min)
-#     AOA_norm = (AOA - AOA_min) / (AOA_max - AOA_min)
-    
-#     norm_vec = [M_norm, ReL_norm, AOA_norm]
-#     unnorm_vec = [M, ReL, AOA]
-#     return norm_vec, unnorm_vec
 
 # Define this function outside of any local scope so it can be pickled
 def run_task(params):

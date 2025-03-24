@@ -76,87 +76,28 @@ def add_edge_features(graph):
 
     return graph
 
-import math
-
-def calculate_dynamic_pressure(M, Re):
-    # Constants
-    gamma = 1.4  # Ratio of specific heats
-    R = 287.87  # Specific gas constant in J/kg·K
-    T = 273.15  # Free-stream temperature in K
-    L = 1.0  # Reynolds length in meters
-    mu = 1.853E-5  # Free-stream viscosity in kg/(m·s)
-
-    # Calculate the speed of sound
-    a = math.sqrt(gamma * R * T)
-
-    # Calculate free-stream velocity
-    U = M * a
-
-    # Calculate fluid density
-    rho = (Re * mu) / (U * L)
-
-    # Calculate dynamic pressure
-    q = 0.5 * rho * U**2
-    return q
-
 def extract_global_context(file_name):
-    """
-    Extracts global context parameters from the file name and normalizes them.
-    Includes Mach number (M), Reynolds number (ReL), Angle of Attack (AOA), and
-    dynamic pressure (q), all normalized with mean and std.
-    """
+    """Extracts global context parameters from the file name."""
     parts = file_name.split('_')
     M = float(parts[1])
     ReL = float(parts[3])
     AOA = float(parts[5].replace('.vtk', ''))
     
-    # Predefined stats for M, ReL, AOA
     M_avg = 0.525
     M_std = 0.325
-    M_norm = (M - M_avg) / M_std
+    M_norm = (M-M_avg)/M_std
     
     ReL_avg = 6.3
     ReL_std = 2.6
-    ReL_norm = (ReL - ReL_avg) / ReL_std
+    ReL_norm = (ReL-ReL_avg)/ReL_std
     
     AOA_avg = 5
     AOA_std = 5
-    AOA_norm = (AOA - AOA_avg) / AOA_std
+    AOA_norm = (AOA-AOA_avg)/AOA_std
     
-    # Calculate and normalize q
-    q = calculate_dynamic_pressure(M, 10**ReL)
-    q_mean = 13066.60  # From your stats
-    q_std = 21293.94   # From your stats
-    q_norm = (q - q_mean) / q_std
-    
-    # Construct vectors
-    norm_vec = [M_norm, ReL_norm, AOA_norm, q_norm]
-    unnorm_vec = [M, ReL, AOA, q]
-    
+    norm_vec = [M_norm, ReL_norm, AOA_norm]
+    unnorm_vec = [M, ReL, AOA]
     return norm_vec, unnorm_vec
-# def extract_global_context(file_name):
-#     """Extracts global context parameters from the file name."""
-#     parts = file_name.split('_')
-#     M = float(parts[1])
-#     ReL = float(parts[3])
-#     AOA = float(parts[5].replace('.vtk', ''))
-    
-#     # Define min and max values for normalization
-#     M_min = 0.2
-#     M_max = 0.85
-#     ReL_min = 5.0
-#     ReL_max = 7.6
-#     AOA_min = 0
-#     AOA_max = 10
-    
-#     # Apply min-max normalization
-#     M_norm = (M - M_min) / (M_max - M_min)
-#     ReL_norm = (ReL - ReL_min) / (ReL_max - ReL_min)
-#     AOA_norm = (AOA - AOA_min) / (AOA_max - AOA_min)
-    
-#     norm_vec = [M_norm, ReL_norm, AOA_norm]
-#     unnorm_vec = [M, ReL, AOA]
-#     return norm_vec, unnorm_vec
 
 # Define this function outside of any local scope so it can be pickled
 def run_task(params):
@@ -176,14 +117,15 @@ def process_partition(graph, num_partitions, halo_hops):
     # For each partition, restore node and edge features
     partition_list = []
     for _, subgraph in partitioned.items():
-        subgraph.ndata["coordinates"] = graph.ndata["coordinates"][
-            subgraph.ndata[dgl.NID]
-        ]
+        subgraph.ndata["coordinates"] = graph.ndata["coordinates"][subgraph.ndata[dgl.NID]]
         subgraph.ndata["normals"] = graph.ndata["normals"][subgraph.ndata[dgl.NID]]
         subgraph.ndata["pressure"] = graph.ndata["pressure"][subgraph.ndata[dgl.NID]]
         subgraph.ndata["shear_stress"] = graph.ndata["shear_stress"][subgraph.ndata[dgl.NID]]
         subgraph.ndata["area"] = graph.ndata["area"][subgraph.ndata[dgl.NID]]  # Add area to node data
-        
+        subgraph.ndata["Mach"] = graph.ndata["Mach"][subgraph.ndata[dgl.NID]]
+        subgraph.ndata["ReL"] = graph.ndata["ReL"][subgraph.ndata[dgl.NID]]
+        subgraph.ndata["AOA"] = graph.ndata["AOA"][subgraph.ndata[dgl.NID]]
+
         if "x" in graph.edata:
             subgraph.edata["x"] = graph.edata["x"][subgraph.edata[dgl.EID]]
 
@@ -195,6 +137,7 @@ def process_partition(graph, num_partitions, halo_hops):
 def read_vtk(file_path):
     """Reads a .vtk file and returns a PyVista mesh."""
     return pv.read(file_path)
+
 
 def visualize_normals(points, normals):
     """Visualize 2D points and their normals using PyVista."""
@@ -266,7 +209,7 @@ def calculate_2d_normals(points, n_neighbors=2, epsilon=1e-6):
     # visualize_normals(points, normals)
     return normals
 
-def split_data(run_dirs, train_ratio=0.95, val_ratio=0.03, test_ratio=0.02):
+def split_data(run_dirs, train_ratio=0.9, val_ratio=0.02, test_ratio=0.08):
     """Split the run directories into training, validation, and test sets."""
     random.shuffle(run_dirs)
     total_runs = len(run_dirs)
@@ -283,51 +226,8 @@ def save_partitioned_graphs(partitioned_graphs, partition_file_path):
     """Save partitioned graphs to the specified file path."""
     save_graphs(partition_file_path, partitioned_graphs)
 
-def clip_values(values, min_val, max_val, clip_values_flag=True):
-    """Clip values to be within min_val and max_val if clip_values_flag is True."""
-    if clip_values_flag:
-        return torch.clamp(values, min=min_val, max=max_val)
-    return values
-
-def visualize_graph(points, edge_sources, edge_destinations, filename="graph_plot.vtp"):
-    import pyvista as pv
-    import numpy as np
-
-    points_3d = np.column_stack((points, np.zeros(len(points))))
-    point_cloud = pv.PolyData(points_3d)
-    
-    # Ensure edges are valid
-    if len(edge_sources) == 0 or len(edge_destinations) == 0:
-        print(f"Warning: No edges to visualize for {filename}")
-        return
-    
-    edges = np.zeros((len(edge_sources), 3), dtype=np.int32)
-    edges[:, 0] = 2  # Each line has 2 points
-    edges[:, 1] = edge_sources
-    edges[:, 2] = edge_destinations
-    
-    point_cloud.lines = edges.flatten()
-    plotter = pv.Plotter()
-    plotter.add_mesh(point_cloud, show_edges=True, point_size=5, line_width=2)
-    plotter.show()
-    point_cloud.save(filename)
-    
-
 def process_run(
-    run_path, 
-    point_list, 
-    node_degree, 
-    num_partitions, 
-    halo_hops, 
-    save_point_cloud=False, 
-    data_type="train", 
-    file_index=1,
-    pressure_min=-1.0,  # New parameter
-    pressure_max=1.0,   # New parameter
-    friction_min=0.0,   # New parameter
-    friction_max=0.1,    # New parameter
-    clip_values_flag=True,
-    partition_graph=True # New parameter
+    run_path, point_list, node_degree, num_partitions, halo_hops, save_point_cloud=False, data_type="train", file_index=1
 ):
     """Process a single run directory to generate a multi-level graph and apply partitioning."""
     run_id = os.path.basename(run_path).split("_")[-1]
@@ -342,6 +242,7 @@ def process_run(
     
     # Extract global context from file name
     global_context, global_context_unnorm = extract_global_context(vtk_files[0])
+    Mach, ReL, AOA = global_context_unnorm
     # Path to save the list of partitions and global context
     partition_file_path = to_absolute_path(f"/workspace/NACA0012_SurfaceFlow/{data_type}_partitions/graph_partitions_{file_index}.bin")
     context_file_path = os.path.join(os.path.dirname(partition_file_path), f"global_context_{file_index}.npy")
@@ -353,7 +254,7 @@ def process_run(
 
     if not os.path.exists(vtk_file):
         print(f"Warning: Missing files for run {run_id}. Skipping...")
-        return 
+        return
 
     try:
         # Load the VTK file
@@ -370,7 +271,7 @@ def process_run(
         all_areas = calculate_area(all_points)  # Calculate areas
         edge_sources = []
         edge_destinations = []
-                
+
         # Construct edges for the point cloud
         nbrs_points = NearestNeighbors(
             n_neighbors=node_degree + 1, algorithm="ball_tree"
@@ -383,74 +284,16 @@ def process_run(
         edge_sources.extend(src_within)
         edge_destinations.extend(dst_within)
 
-        # visualize_graph(all_points, edge_sources, edge_destinations, f"graph_run_{run_id}.vtp")
-        
         # Compute pressure and shear stress for the point cloud
-        # nbrs_surface = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(
-        #     surface_vertices
-        # )
-        # _, indices = nbrs_surface.kneighbors(all_points)
-        # indices = indices.flatten()
+        nbrs_surface = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(
+            surface_vertices
+        )
+        _, indices = nbrs_surface.kneighbors(all_points)
+        indices = indices.flatten()
 
-        pressure = pressure_ref
-        shear_stress = shear_stress_ref
-            
-        # surface_mesh = read_vtk(vtk_file)
-        # surface_vertices = fetch_mesh_vertices(surface_mesh)  # 2D (X, Y)
-        # surface_vertices = np.array(surface_vertices)
-        # surface_mesh = surface_mesh.cell_data_to_point_data()
-        # node_attributes = surface_mesh.point_data
-        # pressure_ref = node_attributes["Pressure_Coefficient"]
-        # shear_stress_ref = node_attributes["Skin_Friction_Coefficient"]
+        pressure = pressure_ref[indices]
+        shear_stress = shear_stress_ref[indices]
 
-        # # Sort the list of points for multi-resolution sampling
-        # sorted_points = sorted(point_list)  # e.g., [320, 640, 1280]
-
-        # # Initialize arrays for multi-resolution sampling
-        # all_points = np.empty((0, 2))
-        # all_normals = np.empty((0, 2))
-        # all_areas = np.empty((0, 1))
-        # edge_sources = []
-        # edge_destinations = []
-
-        # # Precompute nearest neighbors for interpolation from original mesh
-        # nbrs_surface = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(surface_vertices)
-
-        # # Multi-resolution sampling
-        # for num_points in sorted_points:
-        #     # Sample points from the surface mesh
-        #     sampled_indices = np.random.choice(len(surface_vertices), size=num_points)
-        #     points = surface_vertices[sampled_indices]
-
-        #     # Interpolate normals from original mesh
-        #     _, indices = nbrs_surface.kneighbors(points)
-        #     indices = indices.flatten()
-        #     normals = calculate_2d_normals(surface_vertices)[indices]  # Use original normals or recompute
-
-        #     # Compute areas (approximation based on nearest neighbors)
-        #     nbrs_temp = NearestNeighbors(n_neighbors=3, algorithm="ball_tree").fit(points)
-        #     distances, _ = nbrs_temp.kneighbors(points)
-        #     area = calculate_area(points).reshape(-1, 1)
-        
-        #     # Accumulate points, normals, and areas
-        #     all_points = np.vstack([all_points, points])
-        #     all_normals = np.vstack([all_normals, normals])
-        #     all_areas = np.vstack([all_areas, area])
-
-        #     # Construct edges with exactly 2 neighbors (linear chain or nearest neighbors)
-        #     nbrs_points = NearestNeighbors(n_neighbors=3, algorithm="ball_tree").fit(all_points)  # 3 to get self + 2 neighbors
-        #     _, indices_within = nbrs_points.kneighbors(all_points)
-        #     # Connect each node to its 2 nearest neighbors (excluding self)
-        #     for i in range(len(all_points)):
-        #         edge_sources.extend([i, i])  # Each node connects to 2 others
-        #         edge_destinations.extend(indices_within[i, 1:3])  # 1st and 2nd neighbors
-
-        # # Interpolate pressure and shear stress for the final combined point cloud
-        # _, indices = nbrs_surface.kneighbors(all_points)
-        # indices = indices.flatten()
-        # pressure = pressure_ref[indices]
-        # shear_stress = shear_stress_ref[indices]
-            
     except Exception as e:
         print(f"Error processing run {run_id}: {e}. Skipping this run...")
         return
@@ -465,27 +308,19 @@ def process_run(
 
         graph.ndata["coordinates"] = torch.tensor(all_points, dtype=torch.float32)  # Only X and Y
         graph.ndata["normals"] = torch.tensor(all_normals, dtype=torch.float32)
-        pressure_tensor = torch.tensor(pressure, dtype=torch.float32).unsqueeze(-1)
-        shear_stress_tensor = torch.tensor(shear_stress[:, :2], dtype=torch.float32)
-        graph.ndata["pressure"] = clip_values(pressure_tensor, pressure_min, pressure_max, clip_values_flag)
-        graph.ndata["shear_stress"] = clip_values(shear_stress_tensor, friction_min, friction_max, clip_values_flag)
+        graph.ndata["pressure"] = torch.tensor(pressure, dtype=torch.float32).unsqueeze(-1)
+        graph.ndata["shear_stress"] = torch.tensor(shear_stress[:, :2], dtype=torch.float32)
         graph.ndata["area"] = torch.tensor(all_areas, dtype=torch.float32).unsqueeze(-1)  # Add area to node data
+        graph.ndata["Mach"] = torch.full((all_normals.shape[0],), Mach, dtype=torch.float32)
+        graph.ndata["ReL"] = torch.full((all_normals.shape[0],), ReL, dtype=torch.float32)
+        graph.ndata["AOA"] = torch.full((all_normals.shape[0],), AOA, dtype=torch.float32)
         graph = add_edge_features(graph)
 
         # Partition the graph
-        # partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
+        partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
 
-        if not partition_graph and graph.num_nodes() > 100000:  # Arbitrary threshold
-            print(f"Warning: Large graph ({graph.num_nodes()} nodes) being processed without partitioning. Consider enabling partitioning if memory issues occur.")
-        if partition_graph:
-            partitioned_graphs = process_partition(graph, num_partitions, halo_hops)
-            save_partitioned_graphs(partitioned_graphs, partition_file_path)
-        else:
-            graph.ndata["inner_node"] = torch.ones(graph.num_nodes(), dtype=torch.bool)
-            graph.ndata[dgl.NID] = torch.arange(graph.num_nodes(), dtype=torch.long)
-            save_graphs(partition_file_path, [graph])
-        
         # Save the partitions and global context
+        save_partitioned_graphs(partitioned_graphs, partition_file_path)
         np.save(context_file_path, global_context)
         np.save(context_file_path_unnorm, global_context_unnorm)
         
@@ -499,6 +334,9 @@ def process_run(
             point_cloud["pressure"] = graph.ndata["pressure"].numpy()  # Keep pressure as it is
             point_cloud["shear_stress"] = graph.ndata["shear_stress"].numpy()
             point_cloud["area"] = graph.ndata["area"].numpy()  # Add area to point cloud
+            point_cloud["Mach"] = graph.ndata["Mach"].numpy()
+            point_cloud["ReL"] = graph.ndata["ReL"].numpy()
+            point_cloud["AOA"] = graph.ndata["AOA"].numpy()
             # point_cloud["x"] = graph.edata["x"].numpy()  # Add area to point cloud
             point_cloud.save(point_cloud_path)
 
@@ -516,12 +354,6 @@ def process_all_runs(
     halo_hops,
     num_workers=8,
     save_point_cloud=False,
-    pressure_min=-1.0,
-    pressure_max=1.0,
-    friction_min=0.0,
-    friction_max=0.1,
-    clip_values_flag=True,
-    partition_graph=True # New parameter
 ):
     """Process all runs in the base directory in parallel."""
 
@@ -531,23 +363,20 @@ def process_all_runs(
         if d.startswith("run_") and os.path.isdir(os.path.join(base_path, d))
     ]
 
-    train_dirs, val_dirs, test_dirs = split_data(run_dirs,train_ratio=0.95, val_ratio=0.03, test_ratio=0.02)
+    train_dirs, val_dirs, test_dirs = split_data(run_dirs)
 
     tasks_train = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "train", i+1, 
-         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "train", i+1)
         for i, run_dir in enumerate(train_dirs)
     ]
 
     tasks_val = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "validation", i+1,
-         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "validation", i+1)
         for i, run_dir in enumerate(val_dirs)
     ]
 
     tasks_test = [
-        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "test", i+1,
-         pressure_min, pressure_max, friction_min, friction_max, clip_values_flag, partition_graph)  # Modified line
+        (run_dir, num_points, node_degree, num_partitions, halo_hops, save_point_cloud, "test", i+1)
         for i, run_dir in enumerate(test_dirs)
     ]
 
@@ -586,12 +415,6 @@ def main(cfg: DictConfig) -> None:
         halo_hops=cfg.num_message_passing_layers,
         num_workers=cfg.num_preprocess_workers,
         save_point_cloud=cfg.save_point_clouds,
-        pressure_min=cfg.get('pressure_min', -1.0),
-        pressure_max=cfg.get('pressure_max', 1.0),
-        friction_min=cfg.get('friction_min', 0.0),
-        friction_max=cfg.get('friction_max', 0.1),
-        clip_values_flag=cfg.get('clip_values_flag', True),
-        partition_graph=cfg.get('partition_graph', True)  # New parameter
     )
 
 if __name__ == "__main__":

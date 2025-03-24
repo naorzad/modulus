@@ -25,26 +25,27 @@ hydra:
 # │            Data Preprocessing             │
 # └───────────────────────────────────────────┘  
 
-num_nodes: [320, 640, 1280]                  # Number of nodes in the graphs
+num_nodes: [200, 400, 800]                  # Number of nodes in the graphs
 node_degree: 2                                       # Degree of the nodes in the graphs
 num_partitions: 2                                    # Number of partitions for each graph
 data_path: /workspace/NACA0012_SurfaceFlow       # Path to the raw data
 epsilon: 1e-8
 num_preprocess_workers: 8                            # Number of workers for data preprocessing
-save_point_clouds: true                             # Save point clouds for the preprocessed data
+save_point_clouds: false                             # Save point clouds for the preprocessed data
 pressure_min: -2.0
 pressure_max: 3.0
 friction_min: -0.01
 friction_max: 0.01
-clip_values_flag: true  # New parameter, defaults to true
+clip_values_flag: false  # New parameter, defaults to true
 partition_graph: false  # Default to partitioning, set to false for single graph
 
 # ┌───────────────────────────────────────────┐
 # │           Model Configuration             │
 # └───────────────────────────────────────────┘
 
-num_message_passing_layers: 15                       # Number of message passing layers
-hidden_dim: 128                                      # Hidden dimension of the model
+num_message_passing_layers: 8                       # Number of message passing layers
+hidden_dim: 256                                      # Hidden dimension of the model
+processor_hidden_dim: 128                                      # Hidden dimension of the model
 activation: silu                                     # Activation function
 
 # ┌───────────────────────────────────────────┐
@@ -53,18 +54,19 @@ activation: silu                                     # Activation function
 
 partitions_path: ${data_path}/train_partitions          # Path to the partitions (.bin files)
 validation_partitions_path: ${data_path}/validation_partitions  # Path to the validation partitions (.bin files)
+test_partitions_path: ${data_path}/test_partitions  # Path to the validation partitions (.bin files)
 stats_file: global_stats.json                       # Path to the global statistics (.json file)
 checkpoint_filename: model_checkpoint.pth           # Filename of the model checkpoint
-num_epochs: 800                                    # Number of epochs
-start_lr: 0.02                                       # Initial learning rate (cos annealing schedule is used) 
-end_lr: 0.000001                                    # Final learning rate (cos annealing schedule is used)                              
-save_checkpoint_freq: 5                             # Frequency of saving the model checkpoint
-validation_freq: 10                                 # Frequency of validation
+num_epochs: 200                                    # Number of epochs
+start_lr: 1e-5                                     # Initial learning rate (cos annealing schedule is used) 
+end_lr: 1e-8                                   # Final learning rate (cos annealing schedule is used)                                   
+save_checkpoint_freq: 10                             # Frequency of saving the model checkpoint
+validation_freq: 100                                 # Frequency of validation
 
 # ┌───────────────────────────────────────────┐
 # │        Performance Optimization           │
 # └───────────────────────────────────────────┘
 
 use_concat_trick: true                              # Use the concatenation trick
-checkpoint_segments: 3                              # Number of segments for the activation checkpointing
+checkpoint_segments: 2                              # Number of segments for the activation checkpointing
 enable_cudnn_benchmark: true                        # Enable cudnn benchmark
