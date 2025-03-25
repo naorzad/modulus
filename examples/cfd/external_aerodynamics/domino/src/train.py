@@ -45,12 +45,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from modulus.distributed import DistributedManager
-from modulus.launch.utils import load_checkpoint, save_checkpoint
+from physicsnemo.distributed import DistributedManager
+from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
 
-from modulus.datapipes.cae.domino_datapipe import DoMINODataPipe
-from modulus.models.domino.model import DoMINO
-from modulus.utils.domino.utils import *
+from physicsnemo.datapipes.cae.domino_datapipe import DoMINODataPipe
+from physicsnemo.models.domino.model import DoMINO
+from physicsnemo.utils.domino.utils import *
 
 
 def relative_loss_fn(output, target, padded_value=-10):
@@ -166,7 +166,7 @@ def relative_loss_fn_surface(output, target, normals, padded_value=-10):
 
 def relative_loss_fn_area(output, target, normals, area, padded_value=-10):
     scale_factor = 1.0  # Get this from the dataset
-    area = area * 10**5
+    area = area * 10**4
     ws_pred = torch.sqrt(
         output[:, :, 1:2] ** 2.0 + output[:, :, 2:3] ** 2.0 + output[:, :, 3:4] ** 2.0
     )
@@ -232,7 +232,7 @@ def relative_loss_fn_area(output, target, normals, area, padded_value=-10):
 
 def mse_loss_fn_area(output, target, normals, area, padded_value=-10):
     scale_factor = 1.0  # Get this from the dataset
-    area = area * 10**5
+    area = area * 10**4
     ws_pred = torch.sqrt(
         output[:, :, 1:2] ** 2.0 + output[:, :, 2:3] ** 2.0 + output[:, :, 3:4] ** 2.0
     )
@@ -956,9 +956,6 @@ def main(cfg: DictConfig) -> None:
         train_sampler.set_epoch(epoch)
         val_sampler.set_epoch(epoch)
 
-        # initial_integral_factor = (epoch+1) * initial_integral_factor_orig
-        # if initial_integral_factor > 50:
-        #     initial_integral_factor = 50
         initial_integral_factor = initial_integral_factor_orig
 
         model.train(True)

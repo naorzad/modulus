@@ -204,13 +204,15 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Optimizer and scheduler
-    optimizer = optim.Adam(model.parameters(), lr=cfg.start_lr, weight_decay=1e-5)
-    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9777)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.start_lr, weight_decay=1e-4)
+    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.977)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.985)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.75, patience=5, threshold=1e-4)
     # scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, end_factor=cfg.end_lr*0.01 , total_iters=cfg.num_epochs)
     # scheduler2 = optim.lr_scheduler.LinearLR(optimizer, start_factor=cfg.start_lr / 10, end_factor=cfg.end_lr / 10, total_iters=cfg.num_epochs /2)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg.num_epochs, eta_min=cfg.end_lr)
+    # scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer, T_max=cfg.num_epochs, eta_min=cfg.end_lr)
     # scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
     #     optimizer, T_0=100, T_mult=2, eta_min=cfg.end_lr)
     
