@@ -280,7 +280,7 @@ def main(cfg: DictConfig) -> None:
     output_dir = "/workspace/outputs/XAeroNetS/test_point_clouds"
     cl_cd_results_list, vtp_files = evaluate_test_data(
         cfg=cfg,
-        model_checkpoint="/workspace/outputs/XAeroNetS/model_checkpoint.pth",
+        model_checkpoint="/workspace/outputs/XAeroNetS/final_model_checkpoint.pth",
         output_dir=output_dir
     )
 
@@ -312,5 +312,34 @@ def main(cfg: DictConfig) -> None:
     print(f"% CD within 10% error: {error_metrics['percent_cd_within']:.2f}%")
     print(f"% Cmy within 10% error: {error_metrics['percent_cmy_within']:.2f}%")
 
+    # Specify the output file
+    output_file = "/workspace/outputs/XAeroNetS/error_metrics_results.txt"
+
+    # Open the file in write mode and write the results
+    with open(output_file, 'w') as f:
+        f.write("Error Metrics:\n")
+        f.write(f"Max Relative Error (CL): {error_metrics['max_cl_error']:.4f}\n")
+        f.write(f"Max Relative Error (CD): {error_metrics['max_cd_error']:.4f}\n")
+        f.write(f"Max Relative Error (Cmy): {error_metrics['max_cmy_error']:.4f}\n")
+        f.write(f"Mean Relative Error (CL): {error_metrics['mean_cl_error']:.4f}\n")
+        f.write(f"Mean Relative Error (CD): {error_metrics['mean_cd_error']:.4f}\n")
+        f.write(f"Mean Relative Error (Cmy): {error_metrics['mean_cmy_error']:.4f}\n")
+        f.write(f"Root Mean Squared Relative Error (CL): {error_metrics['rmsre_cl']:.4f}\n")
+        f.write(f"Root Mean Squared Relative Error (CD): {error_metrics['rmsre_cd']:.4f}\n")
+        f.write(f"Root Mean Squared Relative Error (Cmy): {error_metrics['rmsre_cmy']:.4f}\n")
+        f.write(f"Mean Absolute Error (CL): {error_metrics['mae_cl']:.4f}\n")  # Corrected label
+        f.write(f"Mean Absolute Error (CD): {error_metrics['mae_cd']:.4f}\n")  # Corrected label
+        f.write(f"Mean Absolute Error (Cmy): {error_metrics['mae_cmy']:.4f}\n")
+        f.write(f"Coefficient of Determination - R² (CL): {error_metrics['r2_cl']:.4f}\n")
+        f.write(f"Coefficient of Determination - R² (CD): {error_metrics['r2_cd']:.4f}\n")
+        f.write(f"Coefficient of Determination - R² (Cmy): {error_metrics['r2_cmy']:.4f}\n")
+        f.write(f"Median Relative Error (CL): {error_metrics['median_cl_error']:.4f}\n")
+        f.write(f"Median Relative Error (CD): {error_metrics['median_cd_error']:.4f}\n")
+        f.write(f"Median Relative Error (Cmy): {error_metrics['median_cmy_error']:.4f}\n")
+        f.write(f"% CL within 10% error: {error_metrics['percent_cl_within']:.2f}%\n")
+        f.write(f"% CD within 10% error: {error_metrics['percent_cd_within']:.2f}%\n")
+        f.write(f"% Cmy within 10% error: {error_metrics['percent_cmy_within']:.2f}%\n")
+
+    print(f"Error metrics results have been written to {output_file}")
 if __name__ == "__main__":
     main()
