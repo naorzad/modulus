@@ -166,7 +166,7 @@ def main(cfg: DictConfig) -> None:
         writer = SummaryWriter(log_dir="tensorboard")
         initialize_wandb(
             project="naca0012",
-            entity="Modulus",
+            entity="modulus",
             name="naca0012",
             mode="disabled",
             group="group",

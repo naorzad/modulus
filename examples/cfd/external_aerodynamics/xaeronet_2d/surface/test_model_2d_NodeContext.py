@@ -9,7 +9,7 @@ from modulus.models.meshgraphnet import MeshGraphNet
 from dataloader_NodeContext import create_dataloader
 from utils import find_bin_files
 from compute_CLCD_Cm import compute_cl_cd
-from plot_CLCD import plot_cl_cd_comparison, plot_cl_cd_colorVars
+from plot_CLCD import plot_cl_cd_comparison, plot_cl_cd_colorVars, plot_coefficients_vs_aoa
 from hydra.utils import to_absolute_path
 import hydra
 from omegaconf import DictConfig
@@ -277,16 +277,17 @@ def evaluate_test_data(cfg: DictConfig, model_checkpoint: str, output_dir: str =
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    output_dir = "/workspace/outputs/XAeroNetS/test_point_clouds"
+    output_dir = "/workspace/outputs/GoodRes/XAeroNetS_L5p7e-4_train0p9_3rdSet/test_point_clouds"
     cl_cd_results_list, vtp_files = evaluate_test_data(
         cfg=cfg,
-        model_checkpoint="/workspace/outputs/XAeroNetS/final_model_checkpoint.pth",
+        model_checkpoint="/workspace/outputs/GoodRes/XAeroNetS_L5p7e-4_train0p9_3rdSet/final_model_checkpoint.pth",
         output_dir=output_dir
-    )
+    )#modulus_main\outputs\GoodRes\XAeroNetS_L5p7e-4_train0p9_3rdSet\final_model_checkpoint.pth"
 
-    plot_cl_cd_comparison(cl_cd_results_list)
-    plot_cl_cd_colorVars(cl_cd_results_list)
-    plot_test_cases(vtp_files, output_dir)
+    if 0: plot_cl_cd_comparison(cl_cd_results_list,output_dir)
+    if 0: plot_cl_cd_colorVars(cl_cd_results_list,output_dir)
+    plot_coefficients_vs_aoa(cl_cd_results_list,output_dir)
+    if 0: plot_test_cases(vtp_files, output_dir)
     error_metrics = compute_error_metrics(cl_cd_results_list)
 
     print("Error Metrics:")
@@ -316,7 +317,7 @@ def main(cfg: DictConfig) -> None:
     output_file = "/workspace/outputs/XAeroNetS/error_metrics_results.txt"
 
     # Open the file in write mode and write the results
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         f.write("Error Metrics:\n")
         f.write(f"Max Relative Error (CL): {error_metrics['max_cl_error']:.4f}\n")
         f.write(f"Max Relative Error (CD): {error_metrics['max_cd_error']:.4f}\n")

@@ -1,7 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+import os
 
-def plot_cl_cd_comparison(cl_cd_list):
+def plot_cl_cd_comparison(cl_cd_list,output_dir):
     """
     Plot a 5D comparison of CL, CD, and Cmy with AOA (color), Mach (size), and ReL (facets).
 
@@ -83,12 +86,12 @@ def plot_cl_cd_comparison(cl_cd_list):
     plt.tight_layout()
 
     # Save with a descriptive filename
-    save_path = "test_point_clouds/CLCD_Cmy_scatter_5D_AOA_Mach_ReL.png"
+    save_path = os.path.join(output_dir,"CLCD_Cmy_scatter_5D_AOA_Mach_ReL.png")
     plt.savefig(save_path, dpi=300)
     print(f"Plot saved to {save_path}")
     plt.close()
 
-def plot_cl_cd_colorVars(cl_cd_list):
+def plot_cl_cd_colorVars(cl_cd_list,output_dir):
     """
     Plot CL, CD, and Cmy comparison with colorbars for all variables: AOA, ReL, and Mach.
 
@@ -150,12 +153,104 @@ def plot_cl_cd_colorVars(cl_cd_list):
         plt.tight_layout()
         
         # Save the figure with the variable name in the filename
-        save_path = f"test_point_clouds/CLCD_Cmy_scatter_{var}.png"
+        save_path = os.path.join(output_dir,f"CLCD_Cmy_scatter_{var}.png")
         plt.savefig(save_path, dpi=300)
         print(f"Plot for {var} saved to {save_path}")
         
         plt.close()
 
+def plot_coefficients_vs_aoa(cl_cd_list, output_dir):
+    """
+    Plot CL, CD, and CM versus AOA for each unique ReL value, with Mach indicated by color.
+
+    Args:
+        cl_cd_list (list): List of dictionaries containing CL_true, CL_pred, CD_true, CD_pred,
+                           Cmy_true, Cmy_pred, AOA, ReL, Mach.
+        output_dir (str): Directory to save the plots.
+    """
+    # Extract data from the input list
+    aoa = np.array([r["AOA"] for r in cl_cd_list])
+    mach = np.array([r["Mach"] for r in cl_cd_list])
+    rel = np.array([r["ReL"] for r in cl_cd_list])
+
+    # Get unique ReL values
+    unique_rel = np.unique(rel)
+
+    # Normalize Mach values for consistent color mapping across all figures
+    mach_min, mach_max = mach.min(), mach.max()
+    norm = Normalize(mach_min, mach_max)
+    cmap = plt.get_cmap('viridis')
+
+    # Define coefficients to plot
+    coefficients = [
+        ('CL', 'CL_true', 'CL_pred'),
+        ('CD', 'CD_true', 'CD_pred'),
+        ('CM', 'Cmy_true', 'Cmy_pred')
+    ]
+
+    # Loop over each unique ReL value
+    for rel_val in unique_rel:
+        # Create a new figure with 3 subplots (one for each coefficient)
+        fig, axes = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+
+        # Filter data for this ReL value
+        mask = rel == rel_val
+        subset_aoa = aoa[mask]
+        subset_mach = mach[mask]
+
+        # Plot each coefficient
+        for row, (coef_name, true_key, pred_key) in enumerate(coefficients):
+            ax = axes[row]
+            subset_true = np.array([r[true_key] for r in cl_cd_list])[mask]
+            subset_pred = np.array([r[pred_key] for r in cl_cd_list])[mask]
+
+            # Plot for each unique Mach value in this ReL
+            unique_mach = np.unique(subset_mach)
+            for m in unique_mach:
+                mach_mask = subset_mach == m
+                # Sort by AOA to ensure lines connect points in order
+                sorted_indices = np.argsort(subset_aoa[mach_mask])
+                aoa_sorted = subset_aoa[mach_mask][sorted_indices]
+                true_sorted = subset_true[mach_mask][sorted_indices]
+                pred_sorted = subset_pred[mach_mask][sorted_indices]
+
+                # Assign color based on Mach
+                color = cmap(norm(m))
+                # Plot true values as lines, predicted as markers
+                if len(aoa_sorted) > 1:
+                    ax.plot(aoa_sorted, true_sorted, color=color)
+                else:
+                    ax.scatter(aoa_sorted, true_sorted, color=color, marker='x')
+                ax.scatter(aoa_sorted, pred_sorted, color=color, marker='o', alpha=0.7)
+
+            # Customize subplot labels and appearance
+            ax.set_ylabel(coef_name)
+            if row == 2:
+                ax.set_xlabel('AOA (degrees)')
+            ax.grid(True)
+
+        # Add a vertical colorbar for Mach
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=axes, label='Mach', orientation='vertical', fraction=0.02, pad=0.05)
+
+        # Add a suptitle with the ReL value
+        fig.suptitle(f'ReL = {rel_val:.2e}', fontsize=16)
+
+        # Add a text annotation to explain lines vs. markers
+        fig.text(0.5, 0.92, "Lines: true values, Markers: predicted values", ha='center', va='center')
+
+        # Manually adjust layout to avoid overlapping
+        plt.subplots_adjust(left=0.1, right=0.85, top=0.9, bottom=0.1, hspace=0.2)
+
+        # Save the plot with a descriptive filename
+        save_path = os.path.join(output_dir, f"coefficients_vs_AOA_ReL_{rel_val:.2e}.png")
+        plt.savefig(save_path, dpi=300)
+        print(f"Plot saved to {save_path}")
+
+        # Close the figure to free memory
+        plt.close(fig)
+    
 # Example usage
 if __name__ == "__main__":
     # Assuming cl_cd_list is populated from your test script with Cmy data
